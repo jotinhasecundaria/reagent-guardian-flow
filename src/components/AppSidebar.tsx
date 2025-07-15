@@ -8,8 +8,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Package,
   QrCode,
@@ -18,6 +22,10 @@ import {
   BarChart3,
   Scan,
   FlaskConical,
+  Calendar,
+  Users,
+  LogOut,
+  User,
 } from "lucide-react";
 
 const menuItems = [
@@ -46,6 +54,12 @@ const menuItems = [
     description: "Registrar consumo",
   },
   {
+    title: "Agendamentos",
+    url: "/appointments",
+    icon: Calendar,
+    description: "Agendar exames",
+  },
+  {
     title: "Logs de Consumo",
     url: "/logs",
     icon: Activity,
@@ -53,9 +67,19 @@ const menuItems = [
   },
 ];
 
+const adminMenuItems = [
+  {
+    title: "Gerenciar Usuários",
+    url: "/users",
+    icon: Users,
+    description: "Administrar usuários",
+  },
+];
+
 export function AppSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
+  const { profile, signOut } = useAuth();
   const currentPath = location.pathname;
   const collapsed = state === "collapsed";
 
@@ -64,6 +88,19 @@ export function AppSidebar() {
       return currentPath === "/";
     }
     return currentPath.startsWith(path);
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word.charAt(0))
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const handleSignOut = () => {
+    signOut();
   };
 
   return (
@@ -103,7 +140,79 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {profile?.role === 'admin' && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administração</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminMenuItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      className={isActive(item.url) ? "bg-accent text-accent-foreground" : ""}
+                    >
+                      <NavLink to={item.url} title={item.description}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
+
+      <SidebarFooter>
+        {profile && (
+          <div className="p-4 border-t">
+            {!collapsed ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={profile.avatar_url} />
+                    <AvatarFallback className="text-xs">
+                      {getInitials(profile.full_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{profile.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{profile.role}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSignOut}
+                  className="w-full"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sair
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={profile.avatar_url} />
+                  <AvatarFallback className="text-xs">
+                    {getInitials(profile.full_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSignOut}
+                  className="w-8 h-8 p-0"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </SidebarFooter>
     </Sidebar>
   );
 }
