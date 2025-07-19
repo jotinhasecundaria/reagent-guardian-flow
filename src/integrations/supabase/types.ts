@@ -71,6 +71,50 @@ export type Database = {
           },
         ]
       }
+      blockchain_transactions: {
+        Row: {
+          block_number: number | null
+          data_hash: string
+          gas_used: number | null
+          id: string
+          reagent_lot_id: string | null
+          status: string | null
+          timestamp: string | null
+          transaction_hash: string
+          transaction_type: string
+        }
+        Insert: {
+          block_number?: number | null
+          data_hash: string
+          gas_used?: number | null
+          id?: string
+          reagent_lot_id?: string | null
+          status?: string | null
+          timestamp?: string | null
+          transaction_hash: string
+          transaction_type: string
+        }
+        Update: {
+          block_number?: number | null
+          data_hash?: string
+          gas_used?: number | null
+          id?: string
+          reagent_lot_id?: string | null
+          status?: string | null
+          timestamp?: string | null
+          transaction_hash?: string
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blockchain_transactions_reagent_lot_id_fkey"
+            columns: ["reagent_lot_id"]
+            isOneToOne: false
+            referencedRelation: "reagent_lots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       consumption_logs: {
         Row: {
           action_type: string
@@ -79,10 +123,12 @@ export type Database = {
           id: string
           ip_address: unknown | null
           notes: string | null
+          points_awarded: number | null
           quantity_after: number
           quantity_before: number
           quantity_changed: number
           reagent_lot_id: string
+          sustainability_impact: string | null
           user_agent: string | null
           user_id: string | null
         }
@@ -93,10 +139,12 @@ export type Database = {
           id?: string
           ip_address?: unknown | null
           notes?: string | null
+          points_awarded?: number | null
           quantity_after: number
           quantity_before: number
           quantity_changed: number
           reagent_lot_id: string
+          sustainability_impact?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -107,10 +155,12 @@ export type Database = {
           id?: string
           ip_address?: unknown | null
           notes?: string | null
+          points_awarded?: number | null
           quantity_after?: number
           quantity_before?: number
           quantity_changed?: number
           reagent_lot_id?: string
+          sustainability_impact?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -127,6 +177,60 @@ export type Database = {
             columns: ["reagent_lot_id"]
             isOneToOne: false
             referencedRelation: "reagent_lots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      demand_predictions: {
+        Row: {
+          confidence_score: number | null
+          created_at: string | null
+          factors: Json | null
+          id: string
+          predicted_consumption: number
+          prediction_period: string
+          reagent_id: string
+          unit_id: string
+          valid_from: string | null
+          valid_until: string
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string | null
+          factors?: Json | null
+          id?: string
+          predicted_consumption: number
+          prediction_period: string
+          reagent_id: string
+          unit_id: string
+          valid_from?: string | null
+          valid_until: string
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string | null
+          factors?: Json | null
+          id?: string
+          predicted_consumption?: number
+          prediction_period?: string
+          reagent_id?: string
+          unit_id?: string
+          valid_from?: string | null
+          valid_until?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demand_predictions_reagent_id_fkey"
+            columns: ["reagent_id"]
+            isOneToOne: false
+            referencedRelation: "reagents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "demand_predictions_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "units"
             referencedColumns: ["id"]
           },
         ]
@@ -157,6 +261,189 @@ export type Database = {
           required_reagents?: Json
         }
         Relationships: []
+      }
+      intelligent_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string | null
+          description: string | null
+          id: string
+          is_resolved: boolean | null
+          metadata: Json | null
+          priority: string
+          resolved_at: string | null
+          resolved_by: string | null
+          title: string
+          unit_id: string | null
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_resolved?: boolean | null
+          metadata?: Json | null
+          priority?: string
+          resolved_at?: string | null
+          resolved_by?: string | null
+          title: string
+          unit_id?: string | null
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_resolved?: boolean | null
+          metadata?: Json | null
+          priority?: string
+          resolved_at?: string | null
+          resolved_by?: string | null
+          title?: string
+          unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intelligent_alerts_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intelligent_alerts_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      iot_readings: {
+        Row: {
+          id: string
+          metadata: Json | null
+          sensor_id: string
+          timestamp: string | null
+          unit_measure: string
+          value: number
+        }
+        Insert: {
+          id?: string
+          metadata?: Json | null
+          sensor_id: string
+          timestamp?: string | null
+          unit_measure: string
+          value: number
+        }
+        Update: {
+          id?: string
+          metadata?: Json | null
+          sensor_id?: string
+          timestamp?: string | null
+          unit_measure?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "iot_readings_sensor_id_fkey"
+            columns: ["sensor_id"]
+            isOneToOne: false
+            referencedRelation: "iot_sensors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      iot_sensors: {
+        Row: {
+          created_at: string | null
+          device_id: string
+          id: string
+          is_active: boolean | null
+          last_reading: Json | null
+          last_reading_at: string | null
+          location: string
+          sensor_type: string
+          unit_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          device_id: string
+          id?: string
+          is_active?: boolean | null
+          last_reading?: Json | null
+          last_reading_at?: string | null
+          location: string
+          sensor_type: string
+          unit_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          device_id?: string
+          id?: string
+          is_active?: boolean | null
+          last_reading?: Json | null
+          last_reading_at?: string | null
+          location?: string
+          sensor_type?: string
+          unit_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "iot_sensors_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      location_suggestions: {
+        Row: {
+          confidence_score: number | null
+          created_at: string | null
+          environmental_conditions: Json | null
+          id: string
+          is_active: boolean | null
+          reagent_type: string | null
+          reasoning: string | null
+          suggested_location: string
+          unit_id: string
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string | null
+          environmental_conditions?: Json | null
+          id?: string
+          is_active?: boolean | null
+          reagent_type?: string | null
+          reasoning?: string | null
+          suggested_location: string
+          unit_id: string
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string | null
+          environmental_conditions?: Json | null
+          id?: string
+          is_active?: boolean | null
+          reagent_type?: string | null
+          reasoning?: string | null
+          suggested_location?: string
+          unit_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_suggestions_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "units"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       manufacturers: {
         Row: {
@@ -285,9 +572,63 @@ export type Database = {
           },
         ]
       }
+      quality_controls: {
+        Row: {
+          id: string
+          next_test_due: string | null
+          observations: string | null
+          parameters: Json | null
+          reagent_lot_id: string
+          test_date: string | null
+          test_result: string | null
+          test_type: string
+          tested_by: string | null
+        }
+        Insert: {
+          id?: string
+          next_test_due?: string | null
+          observations?: string | null
+          parameters?: Json | null
+          reagent_lot_id: string
+          test_date?: string | null
+          test_result?: string | null
+          test_type: string
+          tested_by?: string | null
+        }
+        Update: {
+          id?: string
+          next_test_due?: string | null
+          observations?: string | null
+          parameters?: Json | null
+          reagent_lot_id?: string
+          test_date?: string | null
+          test_result?: string | null
+          test_type?: string
+          tested_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_controls_reagent_lot_id_fkey"
+            columns: ["reagent_lot_id"]
+            isOneToOne: false
+            referencedRelation: "reagent_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quality_controls_tested_by_fkey"
+            columns: ["tested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reagent_lots: {
         Row: {
+          ai_recommended_location: string | null
+          blockchain_hash: string | null
           created_at: string | null
+          criticality_level: string | null
           current_quantity: number
           expiry_date: string
           id: string
@@ -297,15 +638,20 @@ export type Database = {
           manufacturer_id: string | null
           minimum_stock: number | null
           qr_code_data: Json | null
+          quality_score: number | null
           reagent_id: string
           registered_by: string | null
           reserved_quantity: number | null
           status: string | null
+          storage_conditions: Json | null
           unit_id: string
           updated_at: string | null
         }
         Insert: {
+          ai_recommended_location?: string | null
+          blockchain_hash?: string | null
           created_at?: string | null
+          criticality_level?: string | null
           current_quantity: number
           expiry_date: string
           id?: string
@@ -315,15 +661,20 @@ export type Database = {
           manufacturer_id?: string | null
           minimum_stock?: number | null
           qr_code_data?: Json | null
+          quality_score?: number | null
           reagent_id: string
           registered_by?: string | null
           reserved_quantity?: number | null
           status?: string | null
+          storage_conditions?: Json | null
           unit_id: string
           updated_at?: string | null
         }
         Update: {
+          ai_recommended_location?: string | null
+          blockchain_hash?: string | null
           created_at?: string | null
+          criticality_level?: string | null
           current_quantity?: number
           expiry_date?: string
           id?: string
@@ -333,10 +684,12 @@ export type Database = {
           manufacturer_id?: string | null
           minimum_stock?: number | null
           qr_code_data?: Json | null
+          quality_score?: number | null
           reagent_id?: string
           registered_by?: string | null
           reserved_quantity?: number | null
           status?: string | null
+          storage_conditions?: Json | null
           unit_id?: string
           updated_at?: string | null
         }
@@ -481,14 +834,67 @@ export type Database = {
         }
         Relationships: []
       }
+      user_gamification: {
+        Row: {
+          achievements: Json | null
+          created_at: string | null
+          id: string
+          level_name: string | null
+          streaks: Json | null
+          total_points: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          achievements?: Json | null
+          created_at?: string | null
+          id?: string
+          level_name?: string | null
+          streaks?: Json | null
+          total_points?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          achievements?: Json | null
+          created_at?: string | null
+          id?: string
+          level_name?: string | null
+          streaks?: Json | null
+          total_points?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_gamification_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      calculate_gamification_points: {
+        Args: {
+          action_type: string
+          reagent_criticality?: string
+          sustainability_factor?: number
+        }
+        Returns: number
+      }
       calculate_stock_status: {
         Args: { lot_id: string }
         Returns: string
+      }
+      generate_demand_prediction: {
+        Args: { p_reagent_id: string; p_unit_id: string; p_period: string }
+        Returns: undefined
       }
       get_current_user_role: {
         Args: Record<PropertyKey, never>
