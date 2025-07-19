@@ -14,6 +14,9 @@ import Appointments from "./pages/Appointments";
 import Users from "./pages/Users";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import Transfers from "./pages/Transfers";
+import Discard from "./pages/Discard";
+import Gamification from "./pages/Gamification";
 
 const queryClient = new QueryClient();
 
@@ -115,6 +118,36 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <Users />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transfers"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Transfers />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/discard"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Discard />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/gamification"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Gamification />
             </Layout>
           </ProtectedRoute>
         }

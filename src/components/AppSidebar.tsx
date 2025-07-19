@@ -26,6 +26,9 @@ import {
   Users,
   LogOut,
   User,
+  ArrowRightLeft,
+  Trash2,
+  Trophy,
 } from "lucide-react";
 
 const menuItems = [
@@ -64,6 +67,24 @@ const menuItems = [
     url: "/logs",
     icon: Activity,
     description: "Histórico e auditoria",
+  },
+  {
+    title: "Transferências",
+    url: "/transfers",
+    icon: ArrowRightLeft,
+    description: "Movimentação interna",
+  },
+  {
+    title: "Descarte Seguro",
+    url: "/discard",
+    icon: Trash2,
+    description: "Descarte controlado",
+  },
+  {
+    title: "Gamificação",
+    url: "/gamification",
+    icon: Trophy,
+    description: "Sistema de pontos",
   },
 ];
 
