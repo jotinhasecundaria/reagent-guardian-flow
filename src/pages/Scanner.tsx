@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { BrowserMultiFormatReader, NotFoundException } from "@zxing/library";
 import {
   Scan,
   Camera,
@@ -16,38 +19,76 @@ import {
   Package,
   User,
   Clock,
+  StopCircle,
 } from "lucide-react";
 
 interface ScannedReagent {
   id: string;
-  name: string;
-  lot: string;
+  reagent_name: string;
+  lot_number: string;
   manufacturer: string;
-  expiryDate: string;
+  expiry_date: string;
   quantity: number;
   unit: string;
   location: string;
-  registeredAt: string;
+  registered_at: string;
 }
 
-interface ConsumptionRecord {
-  reagentId: string;
-  quantityUsed: number;
-  notes: string;
-  user: string;
-  timestamp: string;
+interface ReagentLot {
+  id: string;
+  lot_number: string;
+  current_quantity: number;
+  location: string;
+  expiry_date: string;
+  reagents: {
+    name: string;
+    unit_measure: string;
+  };
+  manufacturers: {
+    name: string;
+  };
+  criticality_level: string;
 }
 
 export default function Scanner() {
   const { toast } = useToast();
+  const { profile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const codeReader = useRef<BrowserMultiFormatReader | null>(null);
   const [scannedData, setScannedData] = useState<ScannedReagent | null>(null);
+  const [reagentLot, setReagentLot] = useState<ReagentLot | null>(null);
   const [consumptionData, setConsumptionData] = useState({
     quantityUsed: "",
     notes: "",
-    user: "João Silva", // Em produção viria da autenticação
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+
+  useEffect(() => {
+    // Initialize QR code reader
+    codeReader.current = new BrowserMultiFormatReader();
+    getVideoDevices();
+    
+    return () => {
+      stopScanning();
+    };
+  }, []);
+
+  const getVideoDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputDevices = devices.filter(device => device.kind === 'videoinput');
+      setDevices(videoInputDevices);
+      if (videoInputDevices.length > 0) {
+        setSelectedDeviceId(videoInputDevices[0].deviceId);
+      }
+    } catch (error) {
+      console.error('Error getting video devices:', error);
+    }
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -56,51 +97,141 @@ export default function Scanner() {
     setIsProcessing(true);
 
     try {
-      // Simulação de leitura de QR code de arquivo
-      // Em produção, usaria uma biblioteca como jsQR ou qr-scanner
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simular processamento
+      if (!codeReader.current) throw new Error('QR code reader not initialized');
 
-      // Mock data que seria extraída do QR code
-      const mockScannedData: ScannedReagent = {
-        id: "1",
-        name: "Glicose Oxidase",
-        lot: "LOT2024001",
-        manufacturer: "BioTech Labs",
-        expiryDate: "2024-12-15",
-        quantity: 75, // Quantidade atual disponível
-        unit: "ml",
-        location: "Geladeira A2",
-        registeredAt: "2024-01-15T10:30:00Z",
+      // Create image element for file processing
+      const imageUrl = URL.createObjectURL(file);
+      const img = new Image();
+      
+      img.onload = async () => {
+        try {
+          const result = await codeReader.current!.decodeFromImageUrl(imageUrl);
+          await processQRCodeResult(result.getText());
+          URL.revokeObjectURL(imageUrl);
+        } catch (error) {
+          console.error('Error reading QR code from file:', error);
+          toast({
+            title: "Erro ao ler QR code",
+            description: "Não foi possível processar a imagem. Verifique se é um QR code válido.",
+            variant: "destructive",
+          });
+          URL.revokeObjectURL(imageUrl);
+        } finally {
+          setIsProcessing(false);
+        }
       };
-
-      setScannedData(mockScannedData);
-
-      toast({
-        title: "QR code lido com sucesso!",
-        description: `Reagente identificado: ${mockScannedData.name}`,
-      });
+      
+      img.onerror = () => {
+        toast({
+          title: "Erro ao carregar imagem",
+          description: "Não foi possível carregar a imagem selecionada.",
+          variant: "destructive",
+        });
+        URL.revokeObjectURL(imageUrl);
+        setIsProcessing(false);
+      };
+      
+      img.src = imageUrl;
 
     } catch (error) {
+      console.error('Error processing file:', error);
       toast({
-        title: "Erro ao ler QR code",
-        description: "Não foi possível processar a imagem. Tente novamente.",
+        title: "Erro ao processar arquivo",
+        description: "Tente novamente com uma imagem válida.",
         variant: "destructive",
       });
-    } finally {
       setIsProcessing(false);
     }
   };
 
-  const startCameraScanner = () => {
-    // Em produção, abriria o scanner de câmera
-    toast({
-      title: "Scanner de câmera",
-      description: "Funcionalidade será implementada com acesso à câmera do dispositivo.",
-    });
+  const startCameraScanning = async () => {
+    if (!codeReader.current || !videoRef.current) return;
+
+    try {
+      setIsScanning(true);
+      const deviceId = selectedDeviceId || undefined;
+      
+      await codeReader.current.decodeFromVideoDevice(deviceId, videoRef.current, (result, err) => {
+        if (result) {
+          processQRCodeResult(result.getText());
+          stopScanning();
+        }
+        if (err && !(err instanceof NotFoundException)) {
+          console.error('Error during scanning:', err);
+        }
+      });
+
+      toast({
+        title: "Scanner iniciado",
+        description: "Aponte a câmera para o QR code do reagente.",
+      });
+
+    } catch (error) {
+      console.error('Error starting camera scan:', error);
+      toast({
+        title: "Erro na câmera",
+        description: "Não foi possível acessar a câmera. Verifique as permissões.",
+        variant: "destructive",
+      });
+      setIsScanning(false);
+    }
   };
 
+  const stopScanning = () => {
+    if (codeReader.current) {
+      codeReader.current.reset();
+    }
+    setIsScanning(false);
+  };
+
+  const processQRCodeResult = async (qrText: string) => {
+    try {
+      const qrData = JSON.parse(qrText) as ScannedReagent;
+      
+      // Buscar dados atualizados do reagente no banco
+      const { data: lotData, error } = await supabase
+        .from('reagent_lots')
+        .select(`
+          id,
+          lot_number,
+          current_quantity,
+          location,
+          expiry_date,
+          reagents (name, unit_measure),
+          manufacturers (name),
+          criticality_level
+        `)
+        .eq('id', qrData.id)
+        .single();
+
+      if (error) {
+        throw new Error('Lote não encontrado no banco de dados');
+      }
+
+      setReagentLot(lotData);
+      setScannedData({
+        ...qrData,
+        quantity: lotData.current_quantity, // Usar quantidade atual do banco
+      });
+
+      toast({
+        title: "QR code lido com sucesso!",
+        description: `Reagente identificado: ${lotData.reagents.name}`,
+      });
+
+    } catch (error) {
+      console.error('Error processing QR code:', error);
+      toast({
+        title: "QR code inválido",
+        description: "Não foi possível processar os dados do QR code.",
+        variant: "destructive",
+      });
+    }
+  };
+
+
   const registerConsumption = async () => {
-    if (!scannedData || !consumptionData.quantityUsed) {
+    if (!scannedData || !reagentLot || !consumptionData.quantityUsed) {
       toast({
         title: "Dados incompletos",
         description: "Informe a quantidade consumida.",
@@ -110,7 +241,7 @@ export default function Scanner() {
     }
 
     const quantityUsed = parseFloat(consumptionData.quantityUsed);
-    if (quantityUsed > scannedData.quantity) {
+    if (quantityUsed > reagentLot.current_quantity) {
       toast({
         title: "Quantidade inválida",
         description: "A quantidade consumida não pode ser maior que a disponível.",
@@ -122,25 +253,60 @@ export default function Scanner() {
     setIsProcessing(true);
 
     try {
-      // Simular registro no Supabase
-      const consumptionRecord: ConsumptionRecord = {
-        reagentId: scannedData.id,
-        quantityUsed,
-        notes: consumptionData.notes,
-        user: consumptionData.user,
-        timestamp: new Date().toISOString(),
-      };
+      // Registrar log de consumo
+      const { error: logError } = await supabase
+        .from('consumption_logs')
+        .insert({
+          reagent_lot_id: reagentLot.id,
+          action_type: 'consume',
+          quantity_changed: quantityUsed,
+          quantity_before: reagentLot.current_quantity,
+          quantity_after: reagentLot.current_quantity - quantityUsed,
+          notes: consumptionData.notes,
+          user_id: profile?.id,
+        });
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (logError) throw logError;
 
-      console.log("Registro que seria salvo no Supabase:", consumptionRecord);
+      // Atualizar quantidade no lote
+      const { error: updateError } = await supabase
+        .from('reagent_lots')
+        .update({
+          current_quantity: reagentLot.current_quantity - quantityUsed,
+        })
+        .eq('id', reagentLot.id);
+
+      if (updateError) throw updateError;
+
+      // Registrar no blockchain se for reagente crítico
+      if (reagentLot.criticality_level === 'critical') {
+        const { error: blockchainError } = await supabase
+          .from('blockchain_transactions')
+          .insert({
+            transaction_hash: `CONSUME_${Date.now()}_${reagentLot.id}`,
+            transaction_type: 'consume',
+            reagent_lot_id: reagentLot.id,
+            data_hash: btoa(JSON.stringify({
+              quantity_consumed: quantityUsed,
+              user: profile?.full_name,
+              notes: consumptionData.notes,
+            })),
+          });
+
+        if (blockchainError) throw blockchainError;
+      }
 
       toast({
         title: "Consumo registrado com sucesso!",
-        description: `${quantityUsed} ${scannedData.unit} de ${scannedData.name} registrados.`,
+        description: `${quantityUsed} ${reagentLot.reagents.unit_measure} de ${reagentLot.reagents.name} registrados.`,
       });
 
-      // Atualizar a quantidade disponível localmente
+      // Atualizar dados locais
+      setReagentLot(prev => prev ? {
+        ...prev,
+        current_quantity: prev.current_quantity - quantityUsed
+      } : null);
+
       setScannedData(prev => prev ? {
         ...prev,
         quantity: prev.quantity - quantityUsed
@@ -150,10 +316,10 @@ export default function Scanner() {
       setConsumptionData({
         quantityUsed: "",
         notes: "",
-        user: consumptionData.user,
       });
 
     } catch (error) {
+      console.error('Error registering consumption:', error);
       toast({
         title: "Erro ao registrar consumo",
         description: "Tente novamente em alguns instantes.",
@@ -166,10 +332,10 @@ export default function Scanner() {
 
   const clearScannedData = () => {
     setScannedData(null);
+    setReagentLot(null);
     setConsumptionData({
       quantityUsed: "",
       notes: "",
-      user: consumptionData.user,
     });
   };
 
@@ -178,6 +344,10 @@ export default function Scanner() {
     const expiry = new Date(expiryDate);
     const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     return daysUntilExpiry <= 30;
+  };
+
+  const isExpired = (expiryDate: string) => {
+    return new Date(expiryDate) < new Date();
   };
 
   return (
@@ -204,10 +374,45 @@ export default function Scanner() {
             {!scannedData ? (
               <>
                 <div className="grid gap-4">
-                  <Button onClick={startCameraScanner} className="h-24 flex flex-col gap-2">
-                    <Camera className="h-8 w-8" />
-                    <span>Usar Câmera</span>
-                  </Button>
+                  {!isScanning ? (
+                    <Button onClick={startCameraScanning} className="h-24 flex flex-col gap-2">
+                      <Camera className="h-8 w-8" />
+                      <span>Usar Câmera</span>
+                    </Button>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <video 
+                          ref={videoRef}
+                          className="w-full h-64 object-cover rounded-lg border"
+                          autoPlay
+                          muted
+                          playsInline
+                        />
+                        <div className="absolute inset-0 border-2 border-primary rounded-lg pointer-events-none">
+                          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-primary rounded-lg"></div>
+                        </div>
+                      </div>
+                      <Button onClick={stopScanning} variant="destructive" className="w-full">
+                        <StopCircle className="h-4 w-4 mr-2" />
+                        Parar Scanner
+                      </Button>
+                      
+                      {devices.length > 1 && (
+                        <select 
+                          value={selectedDeviceId}
+                          onChange={(e) => setSelectedDeviceId(e.target.value)}
+                          className="w-full p-2 border rounded"
+                        >
+                          {devices.map((device) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Câmera ${device.deviceId.slice(0, 8)}...`}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="relative">
                     <Button 
@@ -229,14 +434,16 @@ export default function Scanner() {
                   </div>
                 </div>
 
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <h4 className="font-medium mb-2">Como usar:</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Use a câmera para leitura direta do QR code</li>
-                    <li>• Ou faça upload de uma foto do QR code</li>
-                    <li>• O sistema identificará automaticamente o reagente</li>
-                  </ul>
-                </div>
+                {!isScanning && (
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <h4 className="font-medium mb-2">Como usar:</h4>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>• Use a câmera para leitura direta do QR code</li>
+                      <li>• Ou faça upload de uma foto do QR code</li>
+                      <li>• O sistema identificará automaticamente o reagente</li>
+                    </ul>
+                  </div>
+                )}
               </>
             ) : (
               <div className="space-y-4">
@@ -252,23 +459,34 @@ export default function Scanner() {
 
                 <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold">{scannedData.name}</h3>
-                    {isExpiringSoon(scannedData.expiryDate) && (
-                      <Badge variant="destructive" className="flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        Vencendo
-                      </Badge>
-                    )}
+                    <h3 className="text-lg font-semibold">{scannedData.reagent_name}</h3>
+                    <div className="flex gap-1">
+                      {reagentLot?.criticality_level === 'critical' && (
+                        <Badge variant="destructive">Crítico</Badge>
+                      )}
+                      {isExpired(scannedData.expiry_date) && (
+                        <Badge variant="destructive" className="flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Vencido
+                        </Badge>
+                      )}
+                      {isExpiringSoon(scannedData.expiry_date) && !isExpired(scannedData.expiry_date) && (
+                        <Badge variant="outline" className="flex items-center gap-1 border-yellow-400 text-yellow-600">
+                          <AlertTriangle className="h-3 w-3" />
+                          Vencendo
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid gap-2 text-sm">
                     <div className="flex items-center gap-2">
                       <Package className="h-4 w-4 text-muted-foreground" />
-                      <span>Lote: {scannedData.lot}</span>
+                      <span>Lote: {scannedData.lot_number}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>Validade: {new Date(scannedData.expiryDate).toLocaleDateString('pt-BR')}</span>
+                      <span>Validade: {new Date(scannedData.expiry_date).toLocaleDateString('pt-BR')}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">Fabricante:</span>
@@ -332,12 +550,9 @@ export default function Scanner() {
                   <Label htmlFor="user">Usuário</Label>
                   <Input
                     id="user"
-                    value={consumptionData.user}
-                    onChange={(e) => setConsumptionData(prev => ({ 
-                      ...prev, 
-                      user: e.target.value 
-                    }))}
+                    value={profile?.full_name || ""}
                     disabled
+                    className="bg-muted"
                   />
                 </div>
 

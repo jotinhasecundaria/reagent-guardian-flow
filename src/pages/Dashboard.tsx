@@ -1,6 +1,9 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
   FlaskConical,
   Package,
@@ -13,26 +16,137 @@ import {
 } from "lucide-react";
 
 export default function Dashboard() {
-  // Mock data para demonstração
-  const stats = {
-    totalReagents: 156,
-    lowStock: 8,
-    expiringSoon: 12,
-    consumptionToday: 23,
+  const { profile } = useAuth();
+  const [stats, setStats] = useState({
+    totalReagents: 0,
+    lowStock: 0,
+    expiringSoon: 0,
+    consumptionToday: 0,
+  });
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [stockByUnit, setStockByUnit] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [profile]);
+
+  const loadDashboardData = async () => {
+    if (!profile) return;
+
+    try {
+      // Carregar estatísticas de reagentes
+      const { data: reagentLots } = await supabase
+        .from('reagent_lots')
+        .select(`
+          id,
+          current_quantity,
+          minimum_stock,
+          expiry_date,
+          status,
+          unit_id,
+          reagents (name, unit_measure),
+          units (name)
+        `)
+        .eq('status', 'active');
+
+      if (reagentLots) {
+        const total = reagentLots.length;
+        const lowStock = reagentLots.filter(lot => lot.current_quantity <= lot.minimum_stock).length;
+        const today = new Date();
+        const expiringSoon = reagentLots.filter(lot => {
+          const expiryDate = new Date(lot.expiry_date);
+          const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          return daysUntilExpiry <= 30 && daysUntilExpiry >= 0;
+        }).length;
+
+        setStats(prev => ({
+          ...prev,
+          totalReagents: total,
+          lowStock,
+          expiringSoon,
+        }));
+
+        // Agrupar por unidade
+        const unitStats = reagentLots.reduce((acc: any, lot) => {
+          const unitName = lot.units?.name || 'Unidade não definida';
+          if (!acc[unitName]) {
+            acc[unitName] = { unit: unitName, total: 0, available: 0, reserved: 0 };
+          }
+          acc[unitName].total += 1;
+          acc[unitName].available += lot.current_quantity;
+          return acc;
+        }, {});
+
+        const stockData = Object.values(unitStats).map((unit: any) => ({
+          ...unit,
+          percentage: Math.round((unit.available / (unit.available + unit.reserved || 1)) * 100)
+        }));
+
+        setStockByUnit(stockData);
+      }
+
+      // Carregar atividade recente
+      const { data: logs } = await supabase
+        .from('consumption_logs')
+        .select(`
+          id,
+          action_type,
+          quantity_changed,
+          created_at,
+          user_id,
+          reagent_lots (
+            reagents (name),
+            units (name)
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (logs) {
+        const activity = logs.map(log => ({
+          id: log.id,
+          reagent: log.reagent_lots?.reagents?.name || 'Reagente',
+          action: log.action_type === 'consume' ? 'Consumo' : 
+                  log.action_type === 'register' ? 'Cadastro' : 
+                  log.action_type === 'transfer' ? 'Transferência' : 'Ação',
+          user: log.user_id || 'Usuário',
+          time: new Date(log.created_at).toLocaleTimeString('pt-BR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          }),
+          unit: log.reagent_lots?.units?.name || 'Unidade'
+        }));
+
+        setRecentActivity(activity);
+
+        // Contar consumos de hoje
+        const todayLogs = logs.filter(log => {
+          const logDate = new Date(log.created_at).toDateString();
+          const today = new Date().toDateString();
+          return logDate === today && log.action_type === 'consume';
+        });
+
+        setStats(prev => ({
+          ...prev,
+          consumptionToday: todayLogs.length
+        }));
+      }
+
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const recentActivity = [
-    { id: 1, reagent: "Reagente A", action: "Consumo", user: "João Silva", time: "14:30", unit: "Lab Central" },
-    { id: 2, reagent: "Reagente B", action: "Cadastro", user: "Maria Santos", time: "13:45", unit: "Lab Norte" },
-    { id: 3, reagent: "Reagente C", action: "Reserva", user: "Pedro Costa", time: "12:15", unit: "Lab Sul" },
-  ];
-
-  const stockByUnit = [
-    { unit: "Lab Central", total: 45, available: 38, reserved: 7, percentage: 84 },
-    { unit: "Lab Norte", total: 32, available: 29, reserved: 3, percentage: 91 },
-    { unit: "Lab Sul", total: 28, available: 22, reserved: 6, percentage: 79 },
-    { unit: "Lab Oeste", total: 51, available: 44, reserved: 7, percentage: 86 },
-  ];
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

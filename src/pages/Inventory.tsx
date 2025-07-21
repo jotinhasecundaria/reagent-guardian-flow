@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Warehouse,
   Search,
@@ -44,76 +46,107 @@ interface Unit {
 
 export default function Inventory() {
   const { toast } = useToast();
+  const { profile } = useAuth();
   const [selectedUnit, setSelectedUnit] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [reagentStock, setReagentStock] = useState<ReagentStock[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock data
-  const units: Unit[] = [
-    { id: "lab-central", name: "Lab Central", totalReagents: 45, lowStockCount: 3 },
-    { id: "lab-norte", name: "Lab Norte", totalReagents: 32, lowStockCount: 1 },
-    { id: "lab-sul", name: "Lab Sul", totalReagents: 28, lowStockCount: 2 },
-    { id: "lab-oeste", name: "Lab Oeste", totalReagents: 51, lowStockCount: 2 },
-  ];
+  useEffect(() => {
+    loadInventoryData();
+  }, [profile]);
 
-  const reagentStock: ReagentStock[] = [
-    {
-      id: "1",
-      name: "Glicose Oxidase",
-      lot: "LOT2024001",
-      unit: "Lab Central",
-      location: "Geladeira A2",
-      manufacturer: "BioTech Labs",
-      expiryDate: "2024-12-15",
-      totalQuantity: 100,
-      availableQuantity: 75,
-      reservedQuantity: 15,
-      minimumStock: 20,
-      status: "normal",
-    },
-    {
-      id: "2",
-      name: "Colesterol HDL",
-      lot: "LOT2024002",
-      unit: "Lab Norte",
-      location: "Prateleira B1",
-      manufacturer: "DiagCorp",
-      expiryDate: "2024-11-30",
-      totalQuantity: 50,
-      availableQuantity: 8,
-      reservedQuantity: 5,
-      minimumStock: 15,
-      status: "low",
-    },
-    {
-      id: "3",
-      name: "Triglicerídeos",
-      lot: "LOT2024003",
-      unit: "Lab Sul",
-      location: "Geladeira C1",
-      manufacturer: "LabMax",
-      expiryDate: "2025-01-20",
-      totalQuantity: 80,
-      availableQuantity: 65,
-      reservedQuantity: 10,
-      minimumStock: 25,
-      status: "normal",
-    },
-    {
-      id: "4",
-      name: "Creatinina",
-      lot: "LOT2024004",
-      unit: "Lab Central",
-      location: "Armário D3",
-      manufacturer: "ReagentPlus",
-      expiryDate: "2024-10-15",
-      totalQuantity: 30,
-      availableQuantity: 5,
-      reservedQuantity: 2,
-      minimumStock: 10,
-      status: "critical",
-    },
-  ];
+  const loadInventoryData = async () => {
+    try {
+      // Carregar unidades
+      const { data: unitsData } = await supabase
+        .from('units')
+        .select('id, name')
+        .eq('is_active', true);
+
+      // Carregar lotes de reagentes
+      const { data: lotsData } = await supabase
+        .from('reagent_lots')
+        .select(`
+          id,
+          lot_number,
+          current_quantity,
+          initial_quantity,
+          reserved_quantity,
+          minimum_stock,
+          location,
+          expiry_date,
+          criticality_level,
+          status,
+          reagents (name, unit_measure),
+          manufacturers (name),
+          units (name)
+        `)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      if (unitsData && lotsData) {
+        // Processar dados das unidades
+        const processedUnits = unitsData.map(unit => {
+          const unitLots = lotsData.filter(lot => lot.units?.name === unit.name);
+          const lowStockCount = unitLots.filter(lot => lot.current_quantity <= lot.minimum_stock).length;
+          
+          return {
+            id: unit.id,
+            name: unit.name,
+            totalReagents: unitLots.length,
+            lowStockCount
+          };
+        });
+
+        // Processar dados dos reagentes
+        const processedReagents = lotsData.map(lot => {
+          const today = new Date();
+          const expiryDate = new Date(lot.expiry_date);
+          const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          let status = 'normal';
+          if (daysUntilExpiry < 0) {
+            status = 'expired';
+          } else if (lot.current_quantity <= lot.minimum_stock || daysUntilExpiry <= 7) {
+            status = 'critical';
+          } else if (daysUntilExpiry <= 30) {
+            status = 'low';
+          }
+
+          return {
+            id: lot.id,
+            name: lot.reagents?.name || 'Reagente',
+            lot: lot.lot_number,
+            unit: lot.units?.name || 'Unidade',
+            location: lot.location || 'Não definido',
+            manufacturer: lot.manufacturers?.name || 'Não definido',
+            expiryDate: lot.expiry_date,
+            totalQuantity: lot.initial_quantity,
+            availableQuantity: lot.current_quantity,
+            reservedQuantity: lot.reserved_quantity || 0,
+            minimumStock: lot.minimum_stock,
+            status: status as ReagentStock['status']
+          };
+        });
+
+        setUnits(processedUnits);
+        setReagentStock(processedReagents);
+      }
+
+    } catch (error) {
+      console.error('Error loading inventory data:', error);
+      toast({
+        title: "Erro ao carregar dados",
+        description: "Não foi possível carregar os dados do inventário.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const filteredReagents = reagentStock.filter((reagent) => {
     const matchesSearch = reagent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -148,13 +181,52 @@ export default function Inventory() {
     return Math.round((available / total) * 100);
   };
 
-  const makeReservation = (reagentId: string, quantity: number) => {
-    // Em produção, faria a chamada para o Supabase
-    toast({
-      title: "Reserva realizada",
-      description: `${quantity} unidades reservadas com sucesso.`,
-    });
+  const makeReservation = async (reagentId: string, quantity: number) => {
+    try {
+      // Buscar quantidade atual
+      const { data: currentLot } = await supabase
+        .from('reagent_lots')
+        .select('reserved_quantity')
+        .eq('id', reagentId)
+        .single();
+
+      if (currentLot) {
+        // Atualizar quantidade reservada
+        const { error } = await supabase
+          .from('reagent_lots')
+          .update({
+            reserved_quantity: (currentLot.reserved_quantity || 0) + quantity
+          })
+          .eq('id', reagentId);
+
+        if (error) throw error;
+
+        toast({
+          title: "Reserva realizada",
+          description: `${quantity} unidades reservadas com sucesso.`,
+        });
+
+        // Recarregar dados
+        loadInventoryData();
+      }
+
+    } catch (error) {
+      console.error('Error making reservation:', error);
+      toast({
+        title: "Erro na reserva",
+        description: "Não foi possível realizar a reserva.",
+        variant: "destructive",
+      });
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
