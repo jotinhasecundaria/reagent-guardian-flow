@@ -3,24 +3,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { FlaskConical, QrCode, Download, Printer } from "lucide-react";
-import QRCode from "qrcode";
-
-interface ReagentData {
-  reagent_id: string;
-  lot: string;
-  manufacturer_id: string;
-  expiryDate: string;
-  quantity: string;
-  unit: string;
-  location: string;
-  notes: string;
-}
+import {
+  FlaskConical,
+  Package,
+  Building,
+  Calendar,
+  MapPin,
+  Save,
+  QrCode,
+} from "lucide-react";
 
 interface Reagent {
   id: string;
@@ -41,305 +37,232 @@ interface Unit {
 export default function RegisterReagent() {
   const { toast } = useToast();
   const { profile } = useAuth();
-  const [formData, setFormData] = useState<ReagentData>({
-    reagent_id: "",
-    lot: "",
-    manufacturer_id: "",
-    expiryDate: "",
-    quantity: "",
-    unit: "ml",
-    location: "",
-    notes: "",
-  });
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
-  const [selectedReagent, setSelectedReagent] = useState<Reagent | null>(null);
+
+  const [formData, setFormData] = useState({
+    reagent_id: "",
+    manufacturer_id: "",
+    unit_id: profile?.unit_id || "",
+    lot_number: "",
+    initial_quantity: "",
+    minimum_stock: "",
+    expiry_date: "",
+    location: "",
+    storage_conditions: "",
+    criticality_level: "normal",
+  });
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    loadSelectOptions();
+  }, [profile]);
 
-  const fetchData = async () => {
+  const loadSelectOptions = async () => {
     try {
-      // Fetch reagents
+      // Carregar reagentes
       const { data: reagentsData } = await supabase
         .from('reagents')
         .select('id, name, unit_measure')
-        .eq('is_active', true);
-      
-      // Fetch manufacturers
+        .eq('is_active', true)
+        .order('name');
+
+      // Carregar fabricantes
       const { data: manufacturersData } = await supabase
         .from('manufacturers')
         .select('id, name')
-        .eq('is_active', true);
-      
-      // Fetch units
+        .eq('is_active', true)
+        .order('name');
+
+      // Carregar unidades
       const { data: unitsData } = await supabase
         .from('units')
         .select('id, name')
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .order('name');
 
-      setReagents(reagentsData || []);
-      setManufacturers(manufacturersData || []);
-      setUnits(unitsData || []);
+      if (reagentsData) setReagents(reagentsData);
+      if (manufacturersData) setManufacturers(manufacturersData);
+      if (unitsData) setUnits(unitsData);
+
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error loading select options:', error);
       toast({
         title: "Erro ao carregar dados",
-        description: "Não foi possível carregar os dados necessários.",
+        description: "Não foi possível carregar as opções de seleção.",
         variant: "destructive",
       });
     }
   };
 
-  const handleInputChange = (field: keyof ReagentData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const generateQRCodeData = (lotData: any) => {
+    return {
+      id: lotData.id,
+      lot_number: lotData.lot_number,
+      reagent_name: reagents.find(r => r.id === lotData.reagent_id)?.name,
+      manufacturer: manufacturers.find(m => m.id === lotData.manufacturer_id)?.name,
+      expiry_date: lotData.expiry_date,
+      timestamp: new Date().toISOString(),
+    };
   };
 
-  const generateQRCode = async () => {
-    if (!formData.reagent_id || !formData.lot || !formData.expiryDate || !formData.quantity || !formData.manufacturer_id) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Preencha todos os campos obrigatórios antes de cadastrar.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!profile?.unit_id) {
-      toast({
-        title: "Erro de usuário",
-        description: "Usuário não está associado a uma unidade.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsGenerating(true);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
 
     try {
-      // Inserir lote no Supabase
+      // Validações
+      if (!formData.reagent_id || !formData.lot_number || !formData.initial_quantity) {
+        toast({
+          title: "Campos obrigatórios",
+          description: "Por favor, preencha todos os campos obrigatórios.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (parseFloat(formData.initial_quantity) <= 0) {
+        toast({
+          title: "Quantidade inválida",
+          description: "A quantidade inicial deve ser maior que zero.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Verificar se o lote já existe
+      const { data: existingLot } = await supabase
+        .from('reagent_lots')
+        .select('id')
+        .eq('lot_number', formData.lot_number)
+        .eq('reagent_id', formData.reagent_id)
+        .single();
+
+      if (existingLot) {
+        toast({
+          title: "Lote já existe",
+          description: "Este número de lote já foi cadastrado para este reagente.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Inserir novo lote
       const { data: newLot, error } = await supabase
         .from('reagent_lots')
         .insert({
           reagent_id: formData.reagent_id,
-          lot_number: formData.lot,
-          manufacturer_id: formData.manufacturer_id,
-          expiry_date: formData.expiryDate,
-          unit_id: profile.unit_id,
-          initial_quantity: parseFloat(formData.quantity),
-          current_quantity: parseFloat(formData.quantity),
-          minimum_stock: Math.ceil(parseFloat(formData.quantity) * 0.2), // 20% como estoque mínimo
-          location: formData.location,
-          registered_by: profile.id,
+          manufacturer_id: formData.manufacturer_id || null,
+          unit_id: formData.unit_id,
+          lot_number: formData.lot_number,
+          initial_quantity: parseFloat(formData.initial_quantity),
+          current_quantity: parseFloat(formData.initial_quantity),
+          minimum_stock: parseFloat(formData.minimum_stock) || 0,
+          expiry_date: formData.expiry_date,
+          location: formData.location || null,
+          criticality_level: formData.criticality_level,
+          storage_conditions: formData.storage_conditions ? 
+            { conditions: formData.storage_conditions } : {},
+          registered_by: profile?.id,
           qr_code_data: {},
-          storage_conditions: {},
         })
-        .select(`
-          id,
-          lot_number,
-          expiry_date,
-          current_quantity,
-          location,
-          reagents (name, unit_measure),
-          manufacturers (name)
-        `)
+        .select()
         .single();
 
       if (error) throw error;
 
-      // Gerar dados para QR code
-      const qrData = {
-        id: newLot.id,
-        reagent_name: newLot.reagents.name,
-        lot_number: newLot.lot_number,
-        manufacturer: newLot.manufacturers.name,
-        expiry_date: newLot.expiry_date,
-        quantity: newLot.current_quantity,
-        unit: newLot.reagents.unit_measure,
-        location: newLot.location,
-        registered_at: new Date().toISOString(),
-      };
-
-      // Atualizar o QR code data no banco
+      // Gerar dados do QR code
+      const qrData = generateQRCodeData(newLot);
+      
+      // Atualizar com dados do QR code
       await supabase
         .from('reagent_lots')
         .update({ qr_code_data: qrData })
         .eq('id', newLot.id);
 
-      const qrCodeDataUrl = await QRCode.toDataURL(JSON.stringify(qrData), {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF',
-        },
-      });
-
-      setQrCodeUrl(qrCodeDataUrl);
-
       toast({
         title: "Reagente cadastrado com sucesso!",
-        description: `${newLot.reagents.name} - Lote ${newLot.lot_number} cadastrado e QR code gerado.`,
+        description: `Lote ${formData.lot_number} foi registrado no sistema.`,
       });
 
-      // Resetar formulário
+      // Limpar formulário
       setFormData({
         reagent_id: "",
-        lot: "",
         manufacturer_id: "",
-        expiryDate: "",
-        quantity: "",
-        unit: selectedReagent?.unit_measure || "ml",
+        unit_id: profile?.unit_id || "",
+        lot_number: "",
+        initial_quantity: "",
+        minimum_stock: "",
+        expiry_date: "",
         location: "",
-        notes: "",
+        storage_conditions: "",
+        criticality_level: "normal",
       });
 
     } catch (error) {
-      console.error('Error creating reagent lot:', error);
+      console.error('Error registering reagent:', error);
       toast({
-        title: "Erro ao cadastrar reagente",
-        description: "Tente novamente em alguns instantes.",
+        title: "Erro ao cadastrar",
+        description: "Não foi possível cadastrar o reagente. Tente novamente.",
         variant: "destructive",
       });
     } finally {
-      setIsGenerating(false);
+      setIsLoading(false);
     }
   };
 
-  const downloadQRCode = () => {
-    if (!qrCodeUrl) return;
-
-    const reagentName = selectedReagent?.name || 'reagente';
-    const link = document.createElement('a');
-    link.href = qrCodeUrl;
-    link.download = `qr-${reagentName}-${formData.lot}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    toast({
-      title: "QR code baixado",
-      description: "O arquivo foi salvo em seus downloads.",
-    });
-  };
-
-  const printQRCode = () => {
-    if (!qrCodeUrl) return;
-
-    const reagentName = selectedReagent?.name || 'Reagente';
-    const manufacturerName = manufacturers.find(m => m.id === formData.manufacturer_id)?.name || '';
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>QR Code - ${reagentName}</title>
-            <style>
-              body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
-              .qr-container { border: 1px solid #ccc; padding: 20px; margin: 20px auto; width: fit-content; }
-              h2 { margin-bottom: 10px; }
-              .details { font-size: 12px; margin-top: 10px; text-align: left; }
-            </style>
-          </head>
-          <body>
-            <div class="qr-container">
-              <h2>${reagentName}</h2>
-              <img src="${qrCodeUrl}" alt="QR Code" />
-              <div class="details">
-                <p><strong>Lote:</strong> ${formData.lot}</p>
-                <p><strong>Fabricante:</strong> ${manufacturerName}</p>
-                <p><strong>Validade:</strong> ${new Date(formData.expiryDate).toLocaleDateString('pt-BR')}</p>
-                <p><strong>Quantidade:</strong> ${formData.quantity} ${formData.unit}</p>
-                <p><strong>Local:</strong> ${formData.location}</p>
-              </div>
-            </div>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      reagent_id: "",
-      lot: "",
-      manufacturer_id: "",
-      expiryDate: "",
-      quantity: "",
-      unit: selectedReagent?.unit_measure || "ml",
-      location: "",
-      notes: "",
-    });
-    setQrCodeUrl("");
-    setSelectedReagent(null);
-  };
-
-  const handleReagentChange = (reagentId: string) => {
-    const reagent = reagents.find(r => r.id === reagentId);
-    setSelectedReagent(reagent || null);
-    setFormData(prev => ({
-      ...prev,
-      reagent_id: reagentId,
-      unit: reagent?.unit_measure || "ml"
-    }));
-  };
+  const selectedReagent = reagents.find(r => r.id === formData.reagent_id);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
           <FlaskConical className="h-8 w-8 text-primary" />
           Cadastrar Reagente
         </h1>
-        <p className="text-muted-foreground">Registre um novo lote de reagente e gere seu QR code</p>
+        <p className="text-muted-foreground">Registrar novo lote de reagente no sistema</p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Dados do Reagente</CardTitle>
-            <CardDescription>Preencha as informações do lote de reagente</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="reagent">Reagente *</Label>
-                <Select value={formData.reagent_id} onValueChange={handleReagentChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o reagente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reagents.map((reagent) => (
-                      <SelectItem key={reagent.id} value={reagent.id}>
-                        {reagent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lot">Número do Lote *</Label>
-                <Input
-                  id="lot"
-                  value={formData.lot}
-                  onChange={(e) => handleInputChange("lot", e.target.value)}
-                  placeholder="Ex: LOT2024001"
-                />
-              </div>
+      {/* Form */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Informações do Lote
+          </CardTitle>
+          <CardDescription>
+            Preencha as informações do novo lote de reagente
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="grid gap-6 md:grid-cols-2">
+            {/* Reagente */}
+            <div className="space-y-2">
+              <Label htmlFor="reagent">Reagente *</Label>
+              <Select value={formData.reagent_id} onValueChange={(value) => 
+                setFormData(prev => ({ ...prev, reagent_id: value }))
+              }>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o reagente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {reagents.map((reagent) => (
+                    <SelectItem key={reagent.id} value={reagent.id}>
+                      {reagent.name} ({reagent.unit_measure})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
+            {/* Fabricante */}
             <div className="space-y-2">
-              <Label htmlFor="manufacturer">Fabricante *</Label>
-              <Select value={formData.manufacturer_id} onValueChange={(value) => handleInputChange("manufacturer_id", value)}>
+              <Label htmlFor="manufacturer">Fabricante</Label>
+              <Select value={formData.manufacturer_id} onValueChange={(value) => 
+                setFormData(prev => ({ ...prev, manufacturer_id: value }))
+              }>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o fabricante" />
                 </SelectTrigger>
@@ -353,128 +276,152 @@ export default function RegisterReagent() {
               </Select>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="expiryDate">Data de Validade *</Label>
+            {/* Unidade */}
+            <div className="space-y-2">
+              <Label htmlFor="unit">Unidade *</Label>
+              <Select value={formData.unit_id} onValueChange={(value) => 
+                setFormData(prev => ({ ...prev, unit_id: value }))
+              }>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a unidade" />
+                </SelectTrigger>
+                <SelectContent>
+                  {units.map((unit) => (
+                    <SelectItem key={unit.id} value={unit.id}>
+                      {unit.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Número do Lote */}
+            <div className="space-y-2">
+              <Label htmlFor="lot_number">Número do Lote *</Label>
+              <Input
+                id="lot_number"
+                value={formData.lot_number}
+                onChange={(e) => setFormData(prev => ({ ...prev, lot_number: e.target.value }))}
+                placeholder="Ex: LOT2024001"
+                required
+              />
+            </div>
+
+            {/* Quantidade Inicial */}
+            <div className="space-y-2">
+              <Label htmlFor="initial_quantity">
+                Quantidade Inicial * {selectedReagent && `(${selectedReagent.unit_measure})`}
+              </Label>
+              <Input
+                id="initial_quantity"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={formData.initial_quantity}
+                onChange={(e) => setFormData(prev => ({ ...prev, initial_quantity: e.target.value }))}
+                placeholder="1000"
+                required
+              />
+            </div>
+
+            {/* Estoque Mínimo */}
+            <div className="space-y-2">
+              <Label htmlFor="minimum_stock">
+                Estoque Mínimo {selectedReagent && `(${selectedReagent.unit_measure})`}
+              </Label>
+              <Input
+                id="minimum_stock"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.minimum_stock}
+                onChange={(e) => setFormData(prev => ({ ...prev, minimum_stock: e.target.value }))}
+                placeholder="50"
+              />
+            </div>
+
+            {/* Data de Validade */}
+            <div className="space-y-2">
+              <Label htmlFor="expiry_date">Data de Validade *</Label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="expiryDate"
+                  id="expiry_date"
                   type="date"
-                  value={formData.expiryDate}
-                  onChange={(e) => handleInputChange("expiryDate", e.target.value)}
+                  value={formData.expiry_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, expiry_date: e.target.value }))}
+                  className="pl-10"
+                  required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="location">Local de Armazenamento</Label>
+            </div>
+
+            {/* Localização */}
+            <div className="space-y-2">
+              <Label htmlFor="location">Localização</Label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="location"
                   value={formData.location}
-                  onChange={(e) => handleInputChange("location", e.target.value)}
-                  placeholder="Ex: Geladeira A2, Prateleira 3"
+                  onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                  placeholder="Ex: Geladeira A - Prateleira 2"
+                  className="pl-10"
                 />
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantidade *</Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  value={formData.quantity}
-                  onChange={(e) => handleInputChange("quantity", e.target.value)}
-                  placeholder="100"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="unit">Unidade</Label>
-                <Input
-                  id="unit"
-                  value={formData.unit}
-                  disabled
-                  className="bg-muted"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Unidade definida pelo reagente selecionado
-                </p>
-              </div>
-            </div>
-
+            {/* Nível de Criticidade */}
             <div className="space-y-2">
-              <Label htmlFor="notes">Observações</Label>
+              <Label htmlFor="criticality">Nível de Criticidade</Label>
+              <Select value={formData.criticality_level} onValueChange={(value) => 
+                setFormData(prev => ({ ...prev, criticality_level: value }))
+              }>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Baixo</SelectItem>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="high">Alto</SelectItem>
+                  <SelectItem value="critical">Crítico</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Condições de Armazenamento */}
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="storage_conditions">Condições de Armazenamento</Label>
               <Textarea
-                id="notes"
-                value={formData.notes}
-                onChange={(e) => handleInputChange("notes", e.target.value)}
-                placeholder="Informações adicionais sobre o reagente..."
+                id="storage_conditions"
+                value={formData.storage_conditions}
+                onChange={(e) => setFormData(prev => ({ ...prev, storage_conditions: e.target.value }))}
+                placeholder="Ex: Manter entre 2-8°C, proteger da luz"
                 rows={3}
               />
             </div>
 
-            <div className="flex gap-2">
-              <Button onClick={generateQRCode} disabled={isGenerating} className="flex-1">
-                <QrCode className="h-4 w-4 mr-2" />
-                {isGenerating ? "Cadastrando..." : "Cadastrar Reagente"}
+            {/* Submit Button */}
+            <div className="md:col-span-2 flex gap-4">
+              <Button type="submit" disabled={isLoading} className="flex-1">
+                {isLoading ? (
+                  <>Cadastrando...</>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Cadastrar Reagente
+                  </>
+                )}
               </Button>
-              <Button variant="outline" onClick={resetForm}>
-                Limpar
+              
+              <Button type="button" variant="outline" className="flex-shrink-0">
+                <QrCode className="h-4 w-4 mr-2" />
+                Gerar QR Code
               </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* QR Code Display */}
-        <Card>
-          <CardHeader>
-            <CardTitle>QR Code Gerado</CardTitle>
-            <CardDescription>
-              {qrCodeUrl 
-                ? "QR code pronto para impressão e etiquetagem" 
-                : "Preencha os campos obrigatórios e clique em 'Cadastrar Reagente'"
-              }
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {qrCodeUrl ? (
-              <div className="space-y-4">
-                <div className="flex justify-center">
-                  <div className="p-4 border-2 border-dashed border-border rounded-lg bg-muted/50">
-                    <img 
-                      src={qrCodeUrl} 
-                      alt="QR Code do reagente" 
-                      className="w-64 h-64 object-contain"
-                    />
-                  </div>
-                </div>
-                
-                <div className="space-y-2 text-sm text-muted-foreground">
-                  <p><strong>Reagente:</strong> {selectedReagent?.name}</p>
-                  <p><strong>Lote:</strong> {formData.lot}</p>
-                  <p><strong>Validade:</strong> {new Date(formData.expiryDate).toLocaleDateString('pt-BR')}</p>
-                  <p><strong>Quantidade:</strong> {formData.quantity} {formData.unit}</p>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button onClick={downloadQRCode} variant="outline" className="flex-1">
-                    <Download className="h-4 w-4 mr-2" />
-                    Baixar
-                  </Button>
-                  <Button onClick={printQRCode} variant="outline" className="flex-1">
-                    <Printer className="h-4 w-4 mr-2" />
-                    Imprimir
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center border-2 border-dashed border-border rounded-lg bg-muted/50">
-                <div className="text-center space-y-2">
-                  <QrCode className="h-12 w-12 mx-auto text-muted-foreground" />
-                  <p className="text-muted-foreground">QR code aparecerá aqui</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
