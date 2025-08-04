@@ -30,7 +30,6 @@ import {
   Trash2,
   Trophy,
 } from "lucide-react";
-
 const menuItems = [
   {
     title: "Dashboard",
@@ -127,14 +126,14 @@ export function AppSidebar() {
   return (
     <Sidebar className={collapsed ? "w-14" : "w-64"} collapsible="icon">
       <SidebarContent>
-        <div className="px-4 py-6">
-          <div className="flex items-center gap-2">
-            <div className="bg-primary rounded-lg p-2">
-              <FlaskConical className="h-6 w-6 text-primary-foreground" />
+        <div className={collapsed ? "mx-auto px-0 py-0" : "px-4 py-4"}>
+          <div className="flex items-center gap-0 md:gap-2">
+            <div className={collapsed ? "rounded-lg filter invert brightness-90 h-6 w-6 mt-4 mr-0" : "rounded-lg filter invert brightness-90 h-10 w-10 mr-1 md:mr-4"}>
+              <img src="/logolaelvis.svg" alt="logo-laelvis" />
             </div>
             {!collapsed && (
               <div>
-                <h1 className="text-lg font-bold text-foreground">LabControl</h1>
+                <h1 className="text-lg font-bold text-foreground">La Elvis Tech</h1>
                 <p className="text-xs text-muted-foreground">Gestão de Reagentes</p>
               </div>
             )}
